@@ -40,5 +40,59 @@
         "subtotal": 6400,
         "potongan": 0,
         "total_bayar": 6400
+    },
+    {
+        "waktu": "2026-11-20 22:48:03",
+        "pembeli": "alda",
+        "voucher": "HEMAT5K",
+        "items": [
+            {
+                "nama": "Oreo 133g",
+                "qty": 1,
+                "harga_satuan": 9000,
+                "subtotal": 9000
+            },
+            {
+                "nama": "Kartu Uno",
+                "qty": 1,
+                "harga_satuan": 23750,
+                "subtotal": 23750
+            }
+        ],
+        "subtotal": 32750,
+        "potongan": 5000,
+        "total_bayar": 27750
+    },
+    {
+        "waktu": "2026-11-20 22:48:34",
+        "pembeli": "alda",
+        "voucher": "HEMAT5K",
+        "items": [
+            {
+                "nama": "Oreo 133g",
+                "qty": 1,
+                "harga_satuan": 9000,
+                "subtotal": 9000
+            }
+        ],
+        "subtotal": 9000,
+        "potongan": 5000,
+        "total_bayar": 4000
+    },
+    {
+        "waktu": "2026-11-20 22:51:53",
+        "pembeli": "alda",
+        "voucher": null,
+        "items": [
+            {
+                "nama": "Sari Roti Gandum",
+                "qty": 19,
+                "harga_satuan": 16200,
+                "subtotal": 307800
+            }
+        ],
+        "subtotal": 307800,
+        "potongan": 0,
+        "total_bayar": 307800
     }
 ]

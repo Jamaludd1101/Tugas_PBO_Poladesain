@@ -1,23 +1,52 @@
+from behavioral_patterns import (
+    KonteksVoucher,
+    StrategiVoucher,
+    TanpaDiskon,
+    VoucherNominal,
+)
 from produk import Produk
 
 
 class Voucher:
-    def __init__(self, kode: str, potongan: int):
-        self.__kode = kode
-        self.__potongan = potongan
+    def __init__(
+        self,
+        kode: str,
+        potongan: int = 0,
+        strategi: StrategiVoucher | None = None,
+    ):
+        self.__kode = kode.strip().upper()
+        if strategi is not None:
+            self.__strategi = strategi
+        elif potongan > 0:
+            self.__strategi = VoucherNominal(potongan)
+        else:
+            self.__strategi = TanpaDiskon()
+        self.__konteks = KonteksVoucher(self.__strategi)
 
     @property
     def kode(self) -> str:
         return self.__kode
 
+    @property
+    def strategi(self) -> StrategiVoucher:
+        return self.__konteks.strategi
+
+    def set_strategi(self, strategi: StrategiVoucher):
+        self.__strategi = strategi
+        self.__konteks.set_strategi(strategi)
+
+    def hitung_potongan(self, total: int) -> int:
+        if total <= 0:
+            return 0
+        return self.__konteks.hitung_potongan(total)
+
     def berlaku(self, total: int) -> bool:
-        # Voucher hanya bisa digunakan jika total belanja >= potongannya
-        return total >= self.__potongan
+        return self.hitung_potongan(total) > 0
 
     def terapkan(self, total: int) -> int:
-        if self.berlaku(total):
-            return total - self.__potongan
-        return total
+        if total <= 0:
+            return 0
+        return self.__konteks.terapkan(total)
 
 
 class Keranjang:

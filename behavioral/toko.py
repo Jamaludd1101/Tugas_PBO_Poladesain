@@ -1,6 +1,13 @@
 import json
 from datetime import datetime
 
+from behavioral_patterns import (
+    KonteksVoucher,
+    StrategiVoucher,
+    TanpaDiskon,
+    VoucherNominal,
+    VoucherPersen,
+)
 from pembeli import Pembeli, Voucher
 from produk import Mainan, Makanan, Minuman, Produk
 
@@ -30,19 +37,44 @@ def format_struk(s: dict) -> str:
 
 
 class Transaksi:
-    def __init__(self, pembeli: Pembeli, voucher: Voucher = None):
+    def __init__(
+        self,
+        pembeli: Pembeli,
+        voucher=None,
+        strategi: StrategiVoucher | None = None,
+    ):
         self.__pembeli = pembeli
         self.__keranjang = pembeli.keranjang  # Agregasi dari pembeli
         self.__voucher = voucher
+        self.__konteks_voucher = KonteksVoucher(strategi or TanpaDiskon())
         self.__struk = None  # terisi setelah bayar() berhasil
 
+    def _siapkan_konteks(self) -> KonteksVoucher:
+        if isinstance(self.__voucher, StrategiVoucher):
+            self.__konteks_voucher.set_strategi(self.__voucher)
+        elif isinstance(self.__voucher, Voucher):
+            self.__konteks_voucher.set_strategi(self.__voucher.strategi)
+        elif self.__voucher is None and self.__konteks_voucher.strategi is None:
+            self.__konteks_voucher.set_strategi(TanpaDiskon())
+        return self.__konteks_voucher
+
+    def hitung_potongan(self) -> int:
+        subtotal = self.__keranjang.total_harga()
+        if subtotal <= 0:
+            return 0
+        if isinstance(self.__voucher, Voucher):
+            return max(0, min(subtotal, self.__voucher.hitung_potongan(subtotal)))
+        konteks = self._siapkan_konteks()
+        return max(0, min(subtotal, konteks.hitung_potongan(subtotal)))
+
     def hitung_total(self) -> int:
-        total = self.__keranjang.total_harga()
-        if self.__voucher:
-            total = self.__voucher.terapkan(
-                total
-            )  # terapkan() sudah mengecek syarat voucher
-        return total
+        subtotal = self.__keranjang.total_harga()
+        if subtotal <= 0:
+            return 0
+        if isinstance(self.__voucher, Voucher):
+            return max(0, self.__voucher.terapkan(subtotal))
+        konteks = self._siapkan_konteks()
+        return konteks.terapkan(subtotal)
 
     def cek_saldo(self) -> bool:
         return self.__pembeli.saldo >= self.hitung_total()
@@ -63,8 +95,9 @@ class Transaksi:
             return False
 
         # 2) Semua syarat terpenuhi -> baru ubah data
+        total_bayar = self.hitung_total()
         self.__struk = self.cetak_struk()  # simpan struk SEBELUM keranjang dikosongkan
-        self.__pembeli.kurangi_saldo(self.hitung_total())
+        self.__pembeli.kurangi_saldo(total_bayar)
         for barang in items:
             barang["produk"].kurangi_stok(barang["jumlah"])
         self.__keranjang.kosongkan()
@@ -86,13 +119,14 @@ class Transaksi:
                 }
             )
         subtotal = self.__keranjang.total_harga()
-        total = self.hitung_total()
+        potongan = self.hitung_potongan()
+        total = max(0, subtotal - potongan)
         return {
             "waktu": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "pembeli": self.__pembeli.nama,
             "items": daftar_item,
             "subtotal": subtotal,
-            "potongan": subtotal - total,
+            "potongan": potongan,
             "total_bayar": total,
         }
 
@@ -101,8 +135,15 @@ class RiwayatTransaksi:
     def __init__(self):
         self.__daftar = []  # isinya dict struk, bukan objek Transaksi
 
+    @property
+    def daftar(self) -> list:
+        return list(self.__daftar)
+
     def tambah_riwayat(self, t: Transaksi):
         self.__daftar.append(t.cetak_struk())
+
+    def tambah_struk_dict(self, struk: dict):
+        self.__daftar.append(struk)
 
     def tampilkan(self):
         if not self.__daftar:
@@ -118,9 +159,11 @@ class RiwayatTransaksi:
     def muat_dari_json(self, filename="riwayat.json"):
         try:
             with open(filename, "r", encoding="utf-8") as f:
-                self.__daftar = json.load(f)
-        except FileNotFoundError:
-            pass  # belum ada file = riwayat kosong
+                data = json.load(f)
+                if isinstance(data, list):
+                    self.__daftar = data
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass  # belum ada file atau file kosong = riwayat kosong
 
 
 class Toko:
@@ -129,8 +172,12 @@ class Toko:
         self.__daftar_produk = []
         self.__riwayat = RiwayatTransaksi()
         self.__riwayat.muat_dari_json()
-        # Voucher yang tersedia, tambahkan di sini
-        self.__daftar_voucher = {"HEMAT5K": Voucher("HEMAT5K", 5000)}
+        # Strategi voucher yang tersedia (Strategy Pattern)
+        self.__daftar_voucher = {
+            "HEMAT5K": VoucherNominal(5000),
+            "HEMAT10": VoucherPersen(10, maks_potongan=15000),
+            "HEMAT20K": VoucherNominal(20000, min_belanja=50000),
+        }
 
     @property
     def nama(self) -> str:
@@ -139,6 +186,45 @@ class Toko:
     @property
     def daftar_produk(self):
         return self.__daftar_produk
+
+    @property
+    def riwayat(self) -> RiwayatTransaksi:
+        return self.__riwayat
+
+    def get_strategi_voucher(self, kode: str) -> StrategiVoucher | None:
+        if not kode:
+            return None
+        return self.__daftar_voucher.get(kode.strip().upper())
+
+    def hitung_diskon_voucher(self, kode: str, subtotal: int) -> dict:
+        kode_bersih = (kode or "").strip().upper()
+        strategi = self.get_strategi_voucher(kode_bersih)
+        if not strategi:
+            return {
+                "valid": False,
+                "kode": kode_bersih,
+                "potongan": 0,
+                "total": max(0, subtotal),
+                "pesan": "Kode voucher tidak valid.",
+            }
+        konteks = KonteksVoucher(strategi)
+        potongan = max(0, min(subtotal, konteks.hitung_potongan(subtotal)))
+        total = konteks.terapkan(subtotal)
+        if subtotal > 0 and potongan == 0:
+            return {
+                "valid": False,
+                "kode": kode_bersih,
+                "potongan": 0,
+                "total": total,
+                "pesan": f"Voucher {kode_bersih} belum memenuhi syarat minimum belanja.",
+            }
+        return {
+            "valid": True,
+            "kode": kode_bersih,
+            "potongan": potongan,
+            "total": total,
+            "pesan": f"Voucher {kode_bersih} berhasil diterapkan!",
+        }
 
     # ---------- Produk ----------
     def tambah_produk(self, p: Produk):
@@ -177,6 +263,13 @@ class Toko:
             if p.nama.lower() == nama.strip().lower():
                 return p
         return None
+
+    def hapus_produk(self, nama: str) -> bool:
+        target = self.cari_produk(nama)
+        if not target:
+            return False
+        self.__daftar_produk.remove(target)
+        return True
 
     def tampilkan_produk(self):
         if not self.__daftar_produk:
@@ -233,12 +326,14 @@ class Toko:
                     pembeli.keranjang.hapus(produk)
 
             elif pilih == "5":
-                voucher_baru = self.__daftar_voucher.get(
-                    input("Kode voucher: ").strip().upper()
-                )
+                kode = input("Kode voucher: ").strip().upper()
+                voucher_baru = self.get_strategi_voucher(kode)
                 if voucher_baru:
                     voucher = voucher_baru
-                    print("Voucher dipasang.")
+                    info_diskon = self.hitung_diskon_voucher(
+                        kode, pembeli.keranjang.total_harga()
+                    )
+                    print(info_diskon["pesan"])
                 else:
                     print("Voucher tidak ditemukan.")
 
@@ -272,16 +367,16 @@ class Toko:
         try:
             with open(filename, "r", encoding="utf-8") as file:
                 data = json.load(file)
-        except FileNotFoundError:
-            print("Database belum ada, mulai dari kosong.")
+        except (FileNotFoundError, json.JSONDecodeError):
+            print("Database belum ada atau kosong, mulai dari baru.")
             return
         self.__daftar_produk = []
         for d in data:
-            if d["kategori"] == "Makanan":
+            if d.get("kategori") == "Makanan":
                 p = Makanan(d["nama"], d["harga"], d["stok"], d["kadaluarsa"])
-            elif d["kategori"] == "Mainan":
+            elif d.get("kategori") == "Mainan":
                 p = Mainan(d["nama"], d["harga"], d["stok"], d["rekomendasi_umur"])
-            elif d["kategori"] == "Minuman":
+            elif d.get("kategori") == "Minuman":
                 p = Minuman(d["nama"], d["harga"], d["stok"], d["ukuran_ml"])
             else:
                 continue
