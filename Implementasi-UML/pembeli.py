@@ -25,35 +25,41 @@ class Keranjang:
         # List of dictionary agar mudah memisahkan produk & kuantitas
         self.__item = []
 
-    def tambah(self, produk: Produk, n: int):
+    def tambah(self, produk: Produk, n: int, tampil_pesan: bool = True) -> bool:
+        """Tambah produk ke keranjang. Return True jika berhasil."""
         if n <= 0:
-            print("Jumlah barang harus lebih dari 0.")
-            return
+            if tampil_pesan:
+                print("Jumlah barang harus lebih dari 0.")
+            return False
 
         # Cek dulu apakah produk sudah ada di keranjang
         for barang in self.__item:
             if barang["produk"].nama == produk.nama:
                 # Cek stok MENGGUNAKAN TOTAL LAMA + BARU
                 if not produk.cek_stok(barang["jumlah"] + n):
-                    print(
-                        f"Gagal: stok {produk.nama} tidak mencukupi. (Sisa stok: {produk.stok})"
-                    )
-                    return
+                    if tampil_pesan:
+                        print(
+                            f"Gagal: stok {produk.nama} tidak mencukupi. (Sisa stok: {produk.stok})"
+                        )
+                    return False
                 barang["jumlah"] += n
-                print(
-                    f"Jumlah {produk.nama} di keranjang diperbarui menjadi {barang['jumlah']}."
-                )
-                return
+                if tampil_pesan:
+                    print(
+                        f"Jumlah {produk.nama} di keranjang diperbarui menjadi {barang['jumlah']}."
+                    )
+                return True
 
         # Jika belum ada, cek stok lalu masukkan sebagai barang baru
         if not produk.cek_stok(n):
-            print(
-                f"Gagal: stok {produk.nama} tidak mencukupi. (Sisa stok: {produk.stok})"
-            )
-            return
+            if tampil_pesan:
+                print(
+                    f"Gagal: stok {produk.nama} tidak mencukupi. (Sisa stok: {produk.stok})"
+                )
+            return False
         self.__item.append({"produk": produk, "jumlah": n})
-        print(f"{produk.nama} sebanyak {n} dimasukkan ke keranjang.")
-
+        if tampil_pesan:
+            print(f"{produk.nama} sebanyak {n} dimasukkan ke keranjang.")
+        return True
     def hapus(self, produk: Produk):
         # Perlu mengecek apakah produk benar-benar ada di list
         ditemukan = False
@@ -100,19 +106,21 @@ class Pembeli:
     @property
     def saldo(self) -> int:
         return self.__saldo
+    
+    def tambah_ke_keranjang(self, produk: Produk, n: int, tampil_pesan: bool = True) -> bool:
+        return self.__keranjang.tambah(produk, n, tampil_pesan)
 
-    def tambah_ke_keranjang(self, produk: Produk, n: int):
-        self.__keranjang.tambah(produk, n)
-
-    def kurangi_saldo(self, n: int) -> bool:
+    def kurangi_saldo(self, n: int, tampil_pesan: bool = True) -> bool:
         if self.__saldo >= n:
             self.__saldo -= n
-            print(
-                f"Saldo berhasil dipotong. Sisa saldo {self.__nama}: Rp{self.__saldo}"
-            )
+            if tampil_pesan:
+                print(
+                    f"Saldo berhasil dipotong. Sisa saldo {self.__nama}: Rp{self.__saldo}"
+                )
             return True
-        print(
-            f"Transaksi gagal: Saldo {self.__nama} tidak mencukupi! "
-            f"(Saldo: Rp{self.__saldo}, Tagihan: Rp{n})"
-        )
+        if tampil_pesan:
+            print(
+                f"Transaksi gagal: Saldo {self.__nama} tidak mencukupi! "
+                f"(Saldo: Rp{self.__saldo}, Tagihan: Rp{n})"
+            )
         return False

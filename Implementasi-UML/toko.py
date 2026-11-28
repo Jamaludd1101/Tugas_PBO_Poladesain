@@ -1,4 +1,5 @@
 import json
+import sys
 from datetime import datetime
 
 from pembeli import Pembeli, Voucher
@@ -46,30 +47,32 @@ class Transaksi:
 
     def cek_saldo(self) -> bool:
         return self.__pembeli.saldo >= self.hitung_total()
-
-    def bayar(self) -> bool:
+    def bayar(self, tampil_pesan: bool = True) -> bool:
         items = self.__keranjang.get_items()
 
         # 1) Cek semua syarat dulu (data belum diubah sama sekali)
         if not items:
-            print("Keranjang masih kosong.")
+            if tampil_pesan:
+                print("Keranjang masih kosong.")
             return False
         for barang in items:
             if not barang["produk"].cek_stok(barang["jumlah"]):
-                print(f"Stok {barang['produk'].nama} tidak cukup.")
+                if tampil_pesan:
+                    print(f"Stok {barang['produk'].nama} tidak cukup.")
                 return False
         if not self.cek_saldo():
-            print("Saldo tidak cukup.")
+            if tampil_pesan:
+                print("Saldo tidak cukup.")
             return False
 
         # 2) Semua syarat terpenuhi -> baru ubah data
         self.__struk = self.cetak_struk()  # simpan struk SEBELUM keranjang dikosongkan
-        self.__pembeli.kurangi_saldo(self.hitung_total())
+        self.__pembeli.kurangi_saldo(self.hitung_total(), tampil_pesan)
         for barang in items:
             barang["produk"].kurangi_stok(barang["jumlah"])
         self.__keranjang.kosongkan()
         return True
-
+    
     def cetak_struk(self) -> dict:
         """Struk final kalau sudah dibayar, atau pratinjau kalau belum."""
         if self.__struk:
@@ -261,6 +264,89 @@ class Toko:
     def tampilkan_riwayat(self):
         self.__riwayat.tampilkan()
 
+
+    # ---------- Simulasi Batch (untuk pengujian) ----------
+    def __cari_produk_fleksibel(self, kode: str):
+        """Cari berdasarkan nama, atau kode urut 'PRD-001' / '1'."""
+        if not kode:
+            return None
+        produk = self.cari_produk(kode)
+        if produk:
+            return produk
+        bersih = kode.strip().upper()
+        if bersih.startswith("PRD-"):
+            bersih = bersih[4:]
+        if bersih.isdigit():
+            indeks = int(bersih) - 1
+            if 0 <= indeks < len(self.__daftar_produk):
+                return self.__daftar_produk[indeks]
+        return None
+
+    def proses_order(self, order: dict) -> dict:
+        """Proses satu order batch tanpa mencetak apa pun."""
+        items = order.get("items", [])
+        if not items:
+            return {"status": "gagal", "pesan": "Keranjang belanja tidak boleh kosong."}
+
+        nama = str(order.get("nama_pembeli", "Pembeli Batch")).strip() or "Pelanggan"
+        saldo = order.get("saldo")
+        if saldo is None:
+            saldo = sys.maxsize
+        pembeli = Pembeli(nama, saldo)
+
+        total_diminta = {}  # nama produk -> total qty diminta
+        for entry in items:
+            kode = str(entry.get("kode") or entry.get("id_produk") or "").strip()
+            try:
+                qty = int(entry.get("qty", entry.get("jumlah", 0)))
+            except (TypeError, ValueError):
+                return {"status": "gagal", "pesan": f"Kuantitas item '{kode}' tidak valid."}
+            if qty <= 0:
+                return {"status": "gagal", "pesan": f"Kuantitas '{kode}' harus lebih dari 0."}
+
+            produk = self.__cari_produk_fleksibel(kode)
+            if produk is None:
+                return {"status": "gagal", "pesan": f"Produk '{kode}' tidak ditemukan."}
+
+            akumulasi = total_diminta.get(produk.nama, 0) + qty
+            if not produk.cek_stok(akumulasi):
+                return {
+                    "status": "gagal",
+                    "pesan": (
+                        f"Stok {produk.nama} tidak mencukupi "
+                        f"(diminta: {akumulasi}, tersedia: {produk.stok})."
+                    ),
+                }
+            total_diminta[produk.nama] = akumulasi
+            pembeli.tambah_ke_keranjang(produk, qty, tampil_pesan=False)
+
+        kode_voucher = (order.get("voucher") or "").strip().upper()
+        voucher = self.__daftar_voucher.get(kode_voucher)
+
+        transaksi = Transaksi(pembeli, voucher)
+        if not transaksi.bayar(tampil_pesan=False):
+            return {
+                "status": "gagal",
+                "pesan": "Transaksi gagal: saldo atau stok tidak mencukupi.",
+            }
+        self.__riwayat.tambah_riwayat(transaksi)
+        return {
+            "status": "sukses",
+            "pesan": "Transaksi berhasil diproses.",
+            "struk": transaksi.cetak_struk(),
+            "sisa_saldo": pembeli.saldo,
+        }
+
+    def simulasi_batch_checkout(self, daftar_order: list) -> list:
+        """Proses banyak order; database & riwayat disimpan sekali di akhir."""
+        hasil = []
+        for order in daftar_order:
+            hasil.append(self.proses_order(order))
+        self.__riwayat.simpan_ke_json()
+        self.simpan_database_json()
+        return hasil
+
+    
     # ---------- Database JSON ----------
     def simpan_database_json(self, filename="database_toko.json"):
         data = [produk.to_dict() for produk in self.__daftar_produk]
@@ -286,3 +372,14 @@ class Toko:
             else:
                 continue
             self.__daftar_produk.append(p)
+
+
+def simulasi_batch_checkout(daftar_order: list) -> list:
+    """Kontrak pengujian (versi OOP).
+
+    Input : [{"nama_pembeli": str, "items": [{"kode": str, "qty": int}], "voucher": str}]
+    Output: list hasil per order (status, pesan, struk, sisa_saldo).
+    """
+    toko = Toko("Minimarket Batch")
+    toko.muat_database_json()
+    return toko.simulasi_batch_checkout(daftar_order)
